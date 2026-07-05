@@ -1,0 +1,65 @@
+groups:
+  - name: node-alerts
+    rules:
+      - alert: NodeExporterDown
+        expr: up{job="node-exporter"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node exporter down on {{ $labels.instance }}"
+          description: "Host-level metrics have been unavailable for 5 minutes."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage above 85% for 10 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage above 90% for 10 minutes."
+
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 10
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }} ({{ $labels.mountpoint }})"
+          description: "Less than 10% free disk space for 15 minutes."
+
+      - alert: HighDiskIOWait
+        expr: rate(node_cpu_seconds_total{mode="iowait"}[5m]) * 100 > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High IO wait on {{ $labels.instance }}"
+          description: "CPU spending >20% time in iowait - possible disk bottleneck."
+
+      - alert: SystemdUnitFailed
+        expr: node_systemd_unit_state{state="failed"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Systemd unit failed on {{ $labels.instance }}"
+          description: "Unit {{ $labels.name }} is in a failed state."
+
+      - alert: HostOutOfInodes
+        expr: (node_filesystem_files_free / node_filesystem_files) * 100 < 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host running out of inodes on {{ $labels.instance }}"
+          description: "Less than 10% free inodes on {{ $labels.mountpoint }}."

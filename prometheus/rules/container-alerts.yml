@@ -1,0 +1,38 @@
+groups:
+  - name: container-alerts
+    rules:
+      - alert: ContainerHighCPU
+        expr: sum(rate(container_cpu_usage_seconds_total{name!=""}[5m])) by (name) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} high CPU"
+          description: "Container CPU usage above 90% for 10m."
+
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes{name!=""} / container_spec_memory_limit_bytes{name!=""}) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} near memory limit"
+          description: "Container using more than 90% of its configured memory limit."
+
+      - alert: ContainerRestartingFrequently
+        expr: increase(container_restart_count{name!=""}[15m]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} restarting frequently"
+          description: "More than 3 restarts in the last 15 minutes."
+
+      - alert: CadvisorDown
+        expr: up{job="cadvisor"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "cAdvisor target down"
+          description: "Prometheus cannot scrape cAdvisor - container-level visibility lost."

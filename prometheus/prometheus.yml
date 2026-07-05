@@ -1,0 +1,80 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: production
+    cluster: docker-compose-host-01
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# -----------------------------------------------------------------------------
+# Scrape jobs. Static services (Prometheus itself, exporters we control) use
+# static_configs. Anything meant to grow over time (more hosts, more probe
+# targets) uses file_sd_configs pointed at targets/*.json - add a host/target
+# there and Prometheus picks it up on its next reload, no restart needed.
+# -----------------------------------------------------------------------------
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+
+  # --- Host metrics (CPU, mem, disk, network) - extensible via file_sd ---
+  - job_name: node-exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/node-exporter.json
+        refresh_interval: 30s
+
+  # --- Container metrics - extensible via file_sd ---
+  - job_name: cadvisor
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/cadvisor.json
+        refresh_interval: 30s
+
+  # --- Blackbox: HTTP probes ---
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/blackbox.json
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ---------------------------------------------------------------------------
+  # FUTURE EXPANSION EXAMPLES (uncomment / adapt when you get there):
+  #
+  # - job_name: kubernetes-pods
+  #   kubernetes_sd_configs:
+  #     - role: pod
+  #   relabel_configs:
+  #     - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+  #       action: keep
+  #       regex: true
+  #
+  # - job_name: kafka
+  #   static_configs:
+  #     - targets: ["kafka-exporter:9308"]
+  # ---------------------------------------------------------------------------

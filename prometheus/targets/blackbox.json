@@ -1,0 +1,11 @@
+[
+  {
+    "targets": [
+      "https://example.com",
+      "https://your-api.example.com/healthz"
+    ],
+    "labels": {
+      "env": "production"
+    }
+  }
+]

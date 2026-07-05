@@ -1,0 +1,9 @@
+[
+  {
+    "targets": ["cadvisor:8080"],
+    "labels": {
+      "env": "production",
+      "host_group": "docker-host"
+    }
+  }
+]

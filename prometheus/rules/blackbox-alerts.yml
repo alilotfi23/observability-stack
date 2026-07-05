@@ -1,0 +1,38 @@
+groups:
+  - name: blackbox-alerts
+    rules:
+      - alert: EndpointDown
+        expr: probe_success == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Endpoint down: {{ $labels.instance }}"
+          description: "Blackbox probe has failed for 3 minutes."
+
+      - alert: EndpointSlowResponse
+        expr: probe_duration_seconds > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow response from {{ $labels.instance }}"
+          description: "Probe duration above 2s for 10m."
+
+      - alert: TLSCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "TLS cert expiring soon on {{ $labels.instance }}"
+          description: "Certificate expires in less than 14 days."
+
+      - alert: BlackboxExporterDown
+        expr: up{job="blackbox-http"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blackbox exporter target down"
+          description: "Synthetic monitoring is currently blind."
