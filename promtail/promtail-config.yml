@@ -1,0 +1,65 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ---------------------------------------------------------------
+  # journald - systemd unit logs
+  # ---------------------------------------------------------------
+  - job_name: journal
+    journal:
+      max_age: 12h
+      path: /var/log/journal
+      labels:
+        job: systemd-journal
+    relabel_configs:
+      - source_labels: ["__journal__systemd_unit"]
+        target_label: unit
+      - source_labels: ["__journal__hostname"]
+        target_label: host
+
+  # ---------------------------------------------------------------
+  # Plain syslog / app logs under /var/log
+  # ---------------------------------------------------------------
+  - job_name: syslog
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: syslog
+          __path__: /var/log/syslog
+
+  # ---------------------------------------------------------------
+  # Docker container logs (via mounted /var/lib/docker/containers)
+  # ---------------------------------------------------------------
+  - job_name: docker-containers
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: docker-containers
+          __path__: /var/lib/docker/containers/*/*log
+    pipeline_stages:
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            time: time
+      - labels:
+          stream:
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      - output:
+          source: output
+
+  # ---------------------------------------------------------------
+  # PLACEHOLDER - Kubernetes pod logs (future expansion)
+  # ---------------------------------------------------------------
+  # - job_name: kubernetes-pods
+  #   kubernetes_sd_configs:
+  #     - role: pod
