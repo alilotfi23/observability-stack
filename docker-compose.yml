@@ -1,0 +1,205 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Network layout:
+#   monitoring-edge     -> only nginx + grafana + prometheus/alertmanager
+#                          (so nginx can reverse-proxy them if you choose to)
+#   monitoring-internal -> everything scrapes/pushes here, never touches
+#                          the host network directly except via nginx
+# ---------------------------------------------------------------------------
+
+networks:
+  monitoring-edge:
+    driver: bridge
+  monitoring-internal:
+    driver: bridge
+    internal: false   # set true if exporters never need outbound internet
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  loki-data:
+
+services:
+
+  # =========================================================================
+  # Reverse proxy - single TLS entrypoint exposed to the host
+  # =========================================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - monitoring-edge
+    depends_on:
+      - grafana
+
+  # =========================================================================
+  # Prometheus - metrics storage, evaluation, scraping
+  # =========================================================================
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.config.file=/etc/prometheus/web.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-20GB}"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/web.yml:/etc/prometheus/web.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/targets:/etc/prometheus/targets:ro
+      - ./certs:/etc/prometheus/certs:ro
+      - prometheus-data:/prometheus
+    ports:
+      # Bound to localhost only - reach it via SSH tunnel / VPN, not the public internet.
+      - "127.0.0.1:9090:9090"
+    networks:
+      - monitoring-edge
+      - monitoring-internal
+
+  # =========================================================================
+  # Alertmanager - alert routing / notification
+  # =========================================================================
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    environment:
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_FROM=${SMTP_FROM}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    volumes:
+      - ./alertmanager/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
+      - ./alertmanager/web.yml:/etc/alertmanager/web.yml:ro
+      - ./alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - ./certs:/etc/alertmanager/certs:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks:
+      - monitoring-edge
+      - monitoring-internal
+
+  # =========================================================================
+  # Node Exporter - host-level Linux metrics
+  # =========================================================================
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.systemd"
+      - "--collector.processes"
+    volumes:
+      - /:/host:ro,rslave
+    networks:
+      - monitoring-internal
+    # No host port published - only reachable from Prometheus over the
+    # internal network. This is the main hardening point vs. the common
+    # "publish 9100 on the host" tutorials.
+
+  # =========================================================================
+  # cAdvisor - per-container resource metrics
+  # =========================================================================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - monitoring-internal
+
+  # =========================================================================
+  # Blackbox Exporter - synthetic HTTP/TCP/ICMP probes
+  # =========================================================================
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: blackbox-exporter
+    restart: unless-stopped
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    networks:
+      - monitoring-internal
+
+  # =========================================================================
+  # Loki - log aggregation storage/query
+  # =========================================================================
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    networks:
+      - monitoring-internal
+
+  # =========================================================================
+  # Promtail - log shipping agent (journald, syslog, docker logs)
+  # =========================================================================
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log/journal:/var/log/journal:ro
+    networks:
+      - monitoring-internal
+    depends_on:
+      - loki
+
+  # =========================================================================
+  # Grafana - dashboards & visualization
+  # =========================================================================
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL}
+      - GF_USERS_ALLOW_SIGN_UP=${GF_USERS_ALLOW_SIGN_UP:-false}
+      - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED:-false}
+      - PROM_BASIC_AUTH_USER=${PROM_BASIC_AUTH_USER}
+      - PROM_BASIC_AUTH_PASSWORD=${PROM_BASIC_AUTH_PASSWORD}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - monitoring-edge
+      - monitoring-internal
+    depends_on:
+      - prometheus
+      - loki
+    # No host port published - reached only through nginx at /grafana/
