@@ -1,0 +1,24 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # NOTE: http here because TLS is commented out by default in prometheus/web.yml.
+    # Once you enable tls_server_config there, switch this to https and remove
+    # tlsSkipVerify (or set it to false and supply the CA cert properly).
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+    secureJsonData:
+      basicAuthPassword: "$__env{PROM_BASIC_AUTH_PASSWORD}"
+    basicAuth: true
+    basicAuthUser: "$__env{PROM_BASIC_AUTH_USER}"
+    editable: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
