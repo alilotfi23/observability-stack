@@ -1,0 +1,18 @@
+# Prometheus native web security config (supported since v2.24+)
+# Reference: https://prometheus.io/docs/prometheus/latest/configuration/https/
+#
+# This gives you login-protected access to the Prometheus UI/API WITHOUT
+# needing a reverse proxy in front of it. TLS is optional but strongly
+# recommended once you have real certs (see tls_server_config below).
+
+basic_auth_users:
+  # Generate this hash with: ./scripts/generate-htpasswd.sh promadmin '<password>'
+  # Format: bcrypt hash only (no username:hash - key IS the username)
+  promadmin: $2y$12$REPLACE_WITH_BCRYPT_HASH_FROM_SCRIPT
+
+# --- Optional but recommended once you have certs (e.g. via cert-manager,
+#     Let's Encrypt, or an internal CA). Uncomment and point to real files.
+# tls_server_config:
+#   cert_file: /etc/prometheus/certs/prometheus.crt
+#   key_file: /etc/prometheus/certs/prometheus.key
+#   min_version: TLS12

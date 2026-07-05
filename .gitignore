@@ -1,7 +1,4 @@
 .env
 certs/*.key
 certs/*.crt
-prometheus/web.yml
-alertmanager/web.yml
-alertmanager/alertmanager.yml
 *.log
